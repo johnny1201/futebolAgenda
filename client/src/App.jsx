@@ -10,7 +10,7 @@ export default function App() {
   const buscar = async () => {
     setCarregando(true);
     try {
-      const resp = await axios.post('http://localhost:5000/api/buscar-jogos', { time });
+      const resp = await axios.post('https://futebolagenda.onrender.com/api/buscar-jogos', { time });
       setResposta(resp.data.resposta);
     } catch (err) {
       setResposta('Erro ao buscar os dados.');
