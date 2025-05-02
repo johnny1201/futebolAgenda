@@ -1,119 +1,61 @@
-// Atualizado com correção automática de nome do time via ChatGPT
+import { useState } from 'react';
+import axios from 'axios';
 
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
-require('dotenv').config();
+export default function App() {
+  const [time, setTime] = useState('');
+  const [resposta, setResposta] = useState('');
+  const [carregando, setCarregando] = useState(false);
+  const [timeCorrigido, setTimeCorrigido] = useState('');
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+  const buscar = async () => {
+    setCarregando(true);
+    setResposta('');
+    setTimeCorrigido('');
 
-const PORT = process.env.PORT || 5000;
-const API_KEY = '3';
+    try {
+      const resp = await axios.post('https://futebolagenda.onrender.com/api/buscar-jogos', { time });
 
-async function corrigirNomeTime(nomeDigitado) {
-  try {
-    const resposta = await axios.post('https://api.openai.com/v1/chat/completions', {
-      model: 'gpt-4',
-      messages: [
-        {
-          role: 'system',
-          content: 'Você é um assistente que corrige nomes de times de futebol. Retorne apenas o nome correto do time com base na digitação errada.'
-        },
-        {
-          role: 'user',
-          content: `Corrija o nome do time: ${nomeDigitado}`
-        }
-      ]
-    }, {
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
+      setResposta(resp.data.resposta);
+      if (resp.data.timeCorrigido && resp.data.timeCorrigido !== time) {
+        setTimeCorrigido(resp.data.timeCorrigido);
       }
-    });
+    } catch (err) {
+      setResposta('Erro ao buscar os dados. Verifique o nome do time ou tente novamente.');
+    } finally {
+      setCarregando(false);
+    }
+  };
 
-    const nomeCorrigido = resposta.data.choices[0].message.content.trim();
-    return nomeCorrigido;
-  } catch (err) {
-    console.error('Erro ao corrigir nome do time:', err.message);
-    return nomeDigitado; // fallback: retorna o original
-  }
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen p-4 gap-4">
+      <h1 className="text-2xl font-bold">Consulta de Jogos</h1>
+
+      <input
+        className="border p-2 rounded w-full max-w-md"
+        placeholder="Digite o nome do time"
+        value={time}
+        onChange={e => setTime(e.target.value)}
+      />
+
+      <button
+        onClick={buscar}
+        disabled={carregando || !time.trim()}
+        className="bg-blue-600 text-white px-4 py-2 rounded"
+      >
+        {carregando ? 'Buscando...' : 'Buscar'}
+      </button>
+
+      {timeCorrigido && (
+        <p className="text-sm text-gray-600">
+          Corrigido para: <strong>{timeCorrigido}</strong>
+        </p>
+      )}
+
+      {resposta && (
+        <div className="bg-gray-100 p-4 rounded max-w-2xl whitespace-pre-wrap text-sm">
+          {resposta}
+        </div>
+      )}
+    </div>
+  );
 }
-
-app.post('/api/buscar-jogos', async (req, res) => {
-  let { time } = req.body;
-  try {
-    if (!time || time.trim().length < 3) {
-      return res.status(400).json({ erro: 'Nome do time inválido ou muito curto.' });
-    }
-
-    // Corrigir nome do time
-    const nomeCorrigido = await corrigirNomeTime(time);
-
-    // Buscar ID do time corrigido
-    const searchRes = await axios.get(`https://www.thesportsdb.com/api/v1/json/${API_KEY}/searchteams.php`, {
-      params: { t: nomeCorrigido }
-    });
-
-    const team = searchRes.data.teams?.[0];
-    if (!team) {
-      return res.status(404).json({ erro: `Time não encontrado mesmo após correção: ${nomeCorrigido}` });
-    }
-
-    const teamId = team.idTeam;
-
-    // Buscar últimos jogos
-    const ultimosRes = await axios.get(`https://www.thesportsdb.com/api/v1/json/${API_KEY}/eventslast.php`, {
-      params: { id: teamId }
-    });
-
-    // Buscar próximos jogos
-    const proximosRes = await axios.get(`https://www.thesportsdb.com/api/v1/json/${API_KEY}/eventsnext.php`, {
-      params: { id: teamId }
-    });
-
-    const resultados = ultimosRes.data.results?.map(jogo => {
-      const placarMandante = parseInt(jogo.intHomeScore);
-      const placarVisitante = parseInt(jogo.intAwayScore);
-      if (isNaN(placarMandante) || isNaN(placarVisitante)) return 'Empate';
-
-      const isMandante = jogo.idHomeTeam === teamId;
-      const ganhou = (isMandante && placarMandante > placarVisitante) || (!isMandante && placarVisitante > placarMandante);
-      const perdeu = (isMandante && placarMandante < placarVisitante) || (!isMandante && placarVisitante < placarMandante);
-
-      return ganhou ? 'Vitória' : perdeu ? 'Derrota' : 'Empate';
-    }) || [];
-
-    const agenda = proximosRes.data.events?.slice(0, 5).map(jogo => {
-      return `${jogo.dateEvent} - ${jogo.strHomeTeam} x ${jogo.strAwayTeam} (${jogo.strVenue || 'Estádio desconhecido'}) - ${jogo.strLeague}`;
-    }) || [];
-
-    // Enviar para OpenAI para formatar a resposta final
-    const chatResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
-      model: 'gpt-4',
-      messages: [
-        {
-          role: 'system',
-          content: 'Você é um assistente de futebol. Resuma os últimos 10 jogos como vitórias, empates e derrotas. Depois, liste os próximos 5 jogos com data, local e onde assistir.'
-        },
-        {
-          role: 'user',
-          content: `Resultados: ${resultados.join(', ')}.\nPróximos jogos: ${agenda.join('; ')}`
-        }
-      ]
-    }, {
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    res.json({ resposta: chatResponse.data.choices[0].message.content });
-  } catch (err) {
-    console.error('Erro ao processar requisição:', err.message);
-    res.status(500).json({ erro: 'Erro ao buscar dados. Detalhes no console.' });
-  }
-});
-
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
